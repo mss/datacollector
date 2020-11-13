@@ -25,8 +25,12 @@ import com.streamsets.pipeline.api.ext.json.Mode;
 import com.streamsets.pipeline.api.impl.TypeSupportConversionException;
 import com.streamsets.pipeline.lib.parser.json.JsonCharDataParser;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 
 public class JsonParserProcessor extends SingleLaneRecordProcessor {
 
@@ -45,17 +49,23 @@ public class JsonParserProcessor extends SingleLaneRecordProcessor {
     Field field = record.get(fieldPathToParse);
     if (field == null) {
       throw new OnRecordErrorException(Errors.JSONP_00, record.getHeader().getSourceId(), fieldPathToParse);
+    } else if (field.getValue() == null) {
+      throw new OnRecordErrorException(Errors.JSONP_01, record.getHeader().getSourceId(), fieldPathToParse);
     } else {
-      String value = null;
-      try {
-        value = field.getValueAsString();
-      } catch (final TypeSupportConversionException ex) {
-        throw new OnRecordErrorException(record, ex.errorCode, ex.params);
+      Reader stream;
+      if (field.getType() == Field.Type.BYTE_ARRAY) {
+        stream = new InputStreamReader(new ByteArrayInputStream(field.getValueAsByteArray()), StandardCharsets.UTF_8);
+      } else {
+        String value;
+        try {
+          value = field.getValueAsString();
+        } catch (final TypeSupportConversionException ex) {
+          throw new OnRecordErrorException(record, ex.errorCode, ex.params);
+        }
+        stream = new StringReader(value);
       }
-      if (value == null) {
-        throw new OnRecordErrorException(Errors.JSONP_01, record.getHeader().getSourceId(), fieldPathToParse);
-      }
-      try (OverrunReader reader = new OverrunReader(new StringReader(value), -1, false, removeCtrlChars)) {
+
+      try (OverrunReader reader = new OverrunReader(stream, -1, false, removeCtrlChars)) {
         JsonCharDataParser parser = new JsonCharDataParser(getContext(), "", reader, 0, Mode.MULTIPLE_OBJECTS, -1);
         Field parsed = parser.parseAsField();
         if (parsed != null) {
